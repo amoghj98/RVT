@@ -44,6 +44,16 @@ class IOUloss(nn.Module):
             area_c = torch.prod(c_br - c_tl, 1)
             giou = iou - (area_c - area_u) / area_c.clamp(1e-16)
             loss = 1 - giou.clamp(min=-1.0, max=1.0)
+        elif self.loss_type == "toffe":
+            # we only care about center point!
+            pos_out = pred[:, :2]
+            dir_out = pred[:, 2]
+            pos_gt = target[:, :2]
+            dir_gt = target[:, 2]
+            pos_criterion = nn.MSELoss(reduction='mean')
+            dir_criterion = nn.MSELoss(reduction='mean')
+            loss = pos_criterion(pos_out, pos_gt)
+            loss += dir_criterion(dir_out, dir_gt)
         else:
             raise NotImplementedError
 

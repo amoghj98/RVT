@@ -7,9 +7,11 @@ checkpoint: ???
 use_test_set: False
 hardware:
   num_workers:
+    train: 8
     eval: 4
   gpus: 0 # GPU idx (multi-gpu not supported for validation)
 batch_size:
+  train: 8
   eval: 8
 training:
   precision: 16

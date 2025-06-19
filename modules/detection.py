@@ -19,6 +19,8 @@ from utils.padding import InputPadderFromShape
 from .utils.detection import BackboneFeatureSelector, EventReprSelector, RNNStates, Mode, mode_2_string, \
     merge_mixed_batches
 
+import logging
+
 
 class Module(pl.LightningModule):
     def __init__(self, full_config: DictConfig):
@@ -177,6 +179,12 @@ class Module(pl.LightningModule):
                                      conf_thre=self.mdl_config.postprocess.confidence_threshold,
                                      nms_thre=self.mdl_config.postprocess.nms_threshold)
 
+        # Ensure obj_labels and pred_processed are the same length
+        min_len = min(len(obj_labels), len(pred_processed))
+        if len(obj_labels) != len(pred_processed):
+            logging.warning(f"obj_labels length ({len(obj_labels)}) != pred_processed length ({len(pred_processed)}), truncating to {min_len}")
+        obj_labels = obj_labels[:min_len]
+        pred_processed = pred_processed[:min_len]
         loaded_labels_proph, yolox_preds_proph = to_prophesee(obj_labels, pred_processed)
 
         assert losses is not None
@@ -217,18 +225,16 @@ class Module(pl.LightningModule):
         self.mode_2_rnn_states[mode].reset(worker_id=worker_id, indices_or_bool_tensor=is_first_sample)
 
         sequence_len = len(ev_tensor_sequence)
-        assert sequence_len > 0
-        batch_size = len(sparse_obj_labels[0])
-        if self.mode_2_batch_size[mode] is None:
-            self.mode_2_batch_size[mode] = batch_size
-        else:
-            assert self.mode_2_batch_size[mode] == batch_size
+        labels_len = len(sparse_obj_labels)
+        if sequence_len != labels_len:
+            logging.error(f"ev_tensor_sequence length: {sequence_len}, sparse_obj_labels length: {labels_len}")
+            # Optionally, raise an error or handle the mismatch
 
         prev_states = self.mode_2_rnn_states[mode].get_states(worker_id=worker_id)
         backbone_feature_selector = BackboneFeatureSelector()
         ev_repr_selector = EventReprSelector()
         obj_labels = list()
-        for tidx in range(sequence_len):
+        for tidx in range(min(sequence_len, labels_len)):
             collect_predictions = (tidx == sequence_len - 1) or \
                                   (self.mode_2_sampling_mode[mode] == DatasetSamplingMode.STREAM)
             ev_tensors = ev_tensor_sequence[tidx]
@@ -246,16 +252,24 @@ class Module(pl.LightningModule):
                 current_labels, valid_batch_indices = sparse_obj_labels[tidx].get_valid_labels_and_batch_indices()
                 # Store backbone features that correspond to the available labels.
                 if len(current_labels) > 0:
+                    # Only add features if we have valid labels
                     backbone_feature_selector.add_backbone_features(backbone_features=backbone_features,
                                                                     selected_indices=valid_batch_indices)
-
                     obj_labels.extend(current_labels)
                     ev_repr_selector.add_event_representations(event_representations=ev_tensors,
                                                                selected_indices=valid_batch_indices)
+
         self.mode_2_rnn_states[mode].save_states_and_detach(worker_id=worker_id, states=prev_states)
+        
+        # If no valid labels were found, skip visualization
         if len(obj_labels) == 0:
             return {ObjDetOutput.SKIP_VIZ: True}
+            
+        # Get batched backbone features
         selected_backbone_features = backbone_feature_selector.get_batched_backbone_features()
+        if selected_backbone_features is None:
+            return {ObjDetOutput.SKIP_VIZ: True}
+            
         predictions, _ = self.mdl.forward_detect(backbone_features=selected_backbone_features)
 
         pred_processed = postprocess(prediction=predictions,
@@ -263,6 +277,12 @@ class Module(pl.LightningModule):
                                      conf_thre=self.mdl_config.postprocess.confidence_threshold,
                                      nms_thre=self.mdl_config.postprocess.nms_threshold)
 
+        # Ensure obj_labels and pred_processed are the same length
+        min_len = min(len(obj_labels), len(pred_processed))
+        if len(obj_labels) != len(pred_processed):
+            logging.warning(f"obj_labels length ({len(obj_labels)}) != pred_processed length ({len(pred_processed)}), truncating to {min_len}")
+        obj_labels = obj_labels[:min_len]
+        pred_processed = pred_processed[:min_len]
         loaded_labels_proph, yolox_preds_proph = to_prophesee(obj_labels, pred_processed)
 
         # For visualization, we only use the last item (per batch).

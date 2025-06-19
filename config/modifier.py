@@ -16,7 +16,7 @@ def dynamically_modify_train_config(config: DictConfig):
         dataset_cfg = config.dataset
 
         dataset_name = dataset_cfg.name
-        assert dataset_name in {'gen1', 'gen4'}
+        assert dataset_name in {'gen1', 'gen4', 'toffe'}
         dataset_hw = get_dataloading_hw(dataset_config=dataset_cfg)
 
         mdl_cfg = config.model
@@ -58,4 +58,5 @@ def _get_modified_hw_multiple_of(hw: Tuple[int, int], multiple_of: int) -> Tuple
     if multiple_of == 1:
         return hw
     new_hw = tuple(math.ceil(x / multiple_of) * multiple_of for x in hw)
+    # new_hw = tuple(math.floor(x / multiple_of) * multiple_of for x in hw)
     return new_hw

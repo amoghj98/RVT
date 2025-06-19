@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 from data.genx_utils.collate import custom_collate_rnd, custom_collate_streaming
 from data.genx_utils.dataset_rnd import build_random_access_dataset, get_weighted_random_sampler, CustomConcatDataset
 from data.genx_utils.dataset_streaming import build_streaming_dataset
+from data.genx_utils.dataset_toffe import build_toffe_dataset, MOTE_Dataset_Parallel
 from data.utils.spatial import get_dataloading_hw
 from data.utils.types import DatasetMode, DatasetSamplingMode
 
@@ -196,3 +197,53 @@ class DataModule(pl.LightningDataModule):
             dataset=self.test_dataset, sampling_mode=self.eval_sampling_mode, dataset_mode=DatasetMode.TESTING,
             dataset_config=self.dataset_config, batch_size=self.overall_batch_size_eval,
             num_workers=self.overall_num_workers_eval))
+
+
+
+class TOFFECustomDataModule(pl.LightningDataModule):
+    def __init__(self, config: DictConfig):
+        super().__init__()
+        self.config = config
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+
+    def setup(self, stage: Optional[str] = None):
+        if stage == 'fit':
+            self.train_dataset = build_toffe_dataset(dataset_mode=DatasetMode.TRAIN, dataset_config=self.config)
+            self.val_dataset = build_toffe_dataset(dataset_mode=DatasetMode.VALIDATION, dataset_config=self.config)
+        elif stage == 'test':
+            self.test_dataset = build_toffe_dataset(dataset_mode=DatasetMode.TESTING, dataset_config=self.config)
+
+    def train_dataloader(self):
+        return DataLoader(
+            dataset=self.train_dataset,
+            batch_size=self.config.batch_size.train,
+            shuffle=True,
+            num_workers=self.config.hardware.num_workers.train,
+            pin_memory=False,
+            drop_last=True,
+            collate_fn=custom_collate_rnd
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            dataset=self.val_dataset,
+            batch_size=self.config.batch_size.eval,
+            shuffle=False,
+            num_workers=self.config.hardware.num_workers.eval,
+            pin_memory=False,
+            drop_last=True,
+            collate_fn=custom_collate_rnd
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            dataset=self.test_dataset,
+            batch_size=self.config.batch_size.eval,
+            shuffle=False,
+            num_workers=self.config.hardware.num_workers.eval,
+            pin_memory=False,
+            drop_last=True,
+            collate_fn=custom_collate_rnd
+        )

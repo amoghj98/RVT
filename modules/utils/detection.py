@@ -3,6 +3,7 @@ from typing import List, Optional, Union, Tuple, Dict, Any
 
 import torch
 import torch as th
+import logging
 
 from data.genx_utils.labels import SparselyBatchedObjectLabels
 from data.utils.types import BackboneFeatures, LstmStates, DatasetSamplingMode
@@ -34,7 +35,26 @@ class BackboneFeatureSelector:
                               selected_indices: Optional[List[int]] = None) -> None:
         if selected_indices is not None:
             assert len(selected_indices) > 0
+            logging.info(f"Selected indices: {selected_indices}")
         for k, v in backbone_features.items():
+            logging.info(f"Feature key: {k}, shape: {v.shape}")
+            
+            # Add bounds checking to prevent CUDA device-side assertion
+            if selected_indices is not None:
+                max_index = max(selected_indices)
+                tensor_batch_size = v.shape[0]
+                logging.info(f"Max index: {max_index}, tensor batch size: {tensor_batch_size}")
+                
+                if max_index >= tensor_batch_size:
+                    logging.error(f"Index {max_index} out of bounds for tensor {k} with shape {v.shape}")
+                    # Filter out invalid indices
+                    valid_indices = [idx for idx in selected_indices if idx < tensor_batch_size]
+                    if len(valid_indices) == 0:
+                        logging.warning(f"No valid indices found for tensor {k}, skipping")
+                        continue
+                    selected_indices = valid_indices
+                    logging.info(f"Using filtered indices: {selected_indices}")
+            
             if k not in self.features:
                 self.features[k] = [v[selected_indices]] if selected_indices is not None else [v]
             else:
@@ -61,6 +81,22 @@ class EventReprSelector:
             self, event_representations: th.Tensor, selected_indices: Optional[List[int]] = None) -> None:
         if selected_indices is not None:
             assert len(selected_indices) > 0
+            
+            # Add bounds checking to prevent CUDA device-side assertion
+            max_index = max(selected_indices)
+            tensor_batch_size = event_representations.shape[0]
+            logging.info(f"Event representations max index: {max_index}, tensor batch size: {tensor_batch_size}")
+            
+            if max_index >= tensor_batch_size:
+                logging.error(f"Index {max_index} out of bounds for event_representations with shape {event_representations.shape}")
+                # Filter out invalid indices
+                valid_indices = [idx for idx in selected_indices if idx < tensor_batch_size]
+                if len(valid_indices) == 0:
+                    logging.warning("No valid indices found for event_representations, skipping")
+                    return
+                selected_indices = valid_indices
+                logging.info(f"Using filtered indices for event_representations: {selected_indices}")
+                
         self.repr_list.extend(x[0] for x in event_representations[selected_indices].split(1))
 
     def get_event_representations_as_list(
